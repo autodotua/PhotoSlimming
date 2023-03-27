@@ -474,7 +474,7 @@ public class Program
             WL($"没有需要删除的文件");
             return;
         }
-        WL($"按回车键开始删除");
+        WL($"按回车键开始删除"); 
         while (Console.ReadKey().Key != ConsoleKey.Enter)
         {
         }
