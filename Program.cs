@@ -1,5 +1,6 @@
 ﻿using ImageMagick;
 using MetadataExtractor;
+using System.Collections.Concurrent;
 using System.Reflection;
 using System.Text.Encodings.Web;
 using System.Text.Json;
@@ -63,17 +64,18 @@ public class Program
 
 #if DEBUG
             WL("DEBUG模式，配置将被重写");
-            p.Config.SourceDir = @"O:\旧事重提\历史\截屏";
+            p.Config.SourceDir = @"O:\旧事重提";
             p.Config.DistDir = @"Z:\mobile\旧事重提\历史\截屏";
             p.Config.DeepestLevel = 2;
             p.Config.Thread = 8;
+            p.Config.BlackList = "(历史)";
             p.Config.OutputFormat = "jpg";
 #endif
         }
         else
         {
-             config = new Configs();
-            File.WriteAllText(Path.Combine(configDir,"示例.json"), JsonSerializer.Serialize(config, new JsonSerializerOptions()
+            config = new Configs();
+            File.WriteAllText(Path.Combine(configDir, "示例.json"), JsonSerializer.Serialize(config, new JsonSerializerOptions()
             {
                 WriteIndented = true,
                 Encoder = JavaScriptEncoder.Create(UnicodeRanges.All)
@@ -82,7 +84,16 @@ public class Program
             Console.ReadKey();
             return;
         }
-        p.Start();
+        try
+        {
+            p.Start();
+        }
+        catch (Exception e)
+        {
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine(e);
+            Console.ReadKey();
+        }
     }
 
     private static readonly object lockObj = new object();
@@ -115,7 +126,7 @@ public class Program
 
     private Regex rRepairTime;
 
-    private HashSet<string> sourceFiles = new HashSet<string>();
+    private ConcurrentDictionary<string,object> sourceFiles = new ConcurrentDictionary<string, object>();
 
     private static Action<string> W = p => Console.Write(p);
 
@@ -279,13 +290,13 @@ public class Program
 
             if (rCompress.IsMatch(file.Name))
             {
-                sourceFiles.Add(Path.GetRelativePath(Config.SourceDir, file.FullName));
+                sourceFiles.TryAdd(Path.GetRelativePath(Config.SourceDir, file.FullName), null);
                 compressFiles.Add(file);
                 compressFilesLength += file.Length;
             }
             else if (rCopy.IsMatch(file.Name))
             {
-                sourceFiles.Add(Path.GetRelativePath(Config.SourceDir, file.FullName));
+                sourceFiles.TryAdd(Path.GetRelativePath(Config.SourceDir, file.FullName),null);
                 copyFiles.Add(file);
                 copyFilesLength += file.Length;
             }
@@ -321,6 +332,7 @@ public class Program
     {
         return GetDistPath(sourceFileName, newExtension, true, out subPath);
     }
+
     private string GetDistPath(string sourceFileName, string newExtension, bool addToSet, out string subPath)
     {
         char spliiter = sourceFileName.Contains('\\') ? '\\' : '/';
@@ -337,7 +349,7 @@ public class Program
         }
         if (addToSet)
         {
-            sourceFiles.Add(subPath);
+            sourceFiles.TryAdd(subPath,null);
         }
         if (newExtension != null)
         {
@@ -455,12 +467,16 @@ public class Program
 
         int index = 0;
 
-       var desiredDistFiles = copyFiles.Select(file => GetDistPath(file.FullName, null, false, out _))
-            .Concat(compressFiles.Select(file => GetDistPath(file.FullName, Config.OutputFormat, false, out _)))
-            .ToHashSet();
+        var desiredDistFiles = copyFiles
+            .Select(file => GetDistPath(file.FullName, null, false, out _))
+             .Concat(compressFiles
+                .Select(file => GetDistPath(file.FullName, Config.OutputFormat, false, out _)))
+             .ToHashSet();
 
 
-        foreach (var file in Directory.EnumerateFiles(Config.DistDir, "*", SearchOption.AllDirectories))
+        foreach (var file in Directory
+            .EnumerateFiles(Config.DistDir, "*", SearchOption.AllDirectories)
+             .Where(p => !rBlack.IsMatch(p)))
         {
             //string subPath = Path.GetRelativePath(Config.DistDir, file);
             if (!desiredDistFiles.Contains(file))
@@ -474,7 +490,7 @@ public class Program
             WL($"没有需要删除的文件");
             return;
         }
-        WL($"按回车键开始删除"); 
+        WL($"按回车键开始删除");
         while (Console.ReadKey().Key != ConsoleKey.Enter)
         {
         }
@@ -484,6 +500,7 @@ public class Program
             File.Delete(file);
             WL(++index + "：已删除 " + file);
         }
+        WL($"完成");
     }
 
     private DateTime? FindExifTime(string file)
