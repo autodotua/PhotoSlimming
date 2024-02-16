@@ -29,7 +29,7 @@ public class Program
         {
             try
             {
-                configs.Add(JsonSerializer.Deserialize<Configs>(File.ReadAllText(file)));
+                configs.Add(JsonSerializer.Deserialize<Configs>(File.ReadAllText(file), Configs.jsonOptions));
             }
             catch (Exception ex)
             {
@@ -37,7 +37,7 @@ public class Program
             }
         }
         Configs config = null;
-        if (configs.Any())
+        if (configs.Count != 0)
         {
             if (configs.Count == 1)
             {
@@ -64,22 +64,18 @@ public class Program
 
 #if DEBUG
             WL("DEBUG模式，配置将被重写");
-            p.Config.SourceDir = @"O:\旧事重提";
-            p.Config.DistDir = @"Z:\mobile\旧事重提\历史\截屏";
+            p.Config.SourceDir = @"O:\旧事重提\历史";
+            p.Config.DistDir = @"Z:\手机照片\旧事重提\历史\";
             p.Config.DeepestLevel = 2;
             p.Config.Thread = 8;
-            p.Config.BlackList = "(历史)";
+            p.Config.BlackList = "(网络)|(妈妈手机照片)";
             p.Config.OutputFormat = "jpg";
 #endif
         }
         else
         {
             config = new Configs();
-            File.WriteAllText(Path.Combine(configDir, "示例.json"), JsonSerializer.Serialize(config, new JsonSerializerOptions()
-            {
-                WriteIndented = true,
-                Encoder = JavaScriptEncoder.Create(UnicodeRanges.All)
-            }));
+            File.WriteAllText(Path.Combine(configDir, "示例.json"), JsonSerializer.Serialize(config, Configs.jsonOptions));
             Console.WriteLine($"已生成{Path.Combine(configDir, "示例.json")}，修改后运行本程序。");
             Console.ReadKey();
             return;
@@ -102,9 +98,13 @@ public class Program
 
     private int allFilesCount = 0;
 
+    private int compressSkipFiles = 0;
+
     private List<FileInfo> compressFiles = new List<FileInfo>();
 
     private long compressFilesLength = 0;
+
+    private int copySkipFiles = 0;
 
     private List<FileInfo> copyFiles = new List<FileInfo>();
 
@@ -126,11 +126,11 @@ public class Program
 
     private Regex rRepairTime;
 
-    private ConcurrentDictionary<string,object> sourceFiles = new ConcurrentDictionary<string, object>();
+    private ConcurrentDictionary<string, object> sourceFiles = new ConcurrentDictionary<string, object>();
 
-    private static Action<string> W = p => Console.Write(p);
+    private static readonly Action<string> W = Console.Write;
 
-    private static Action<string> WL = p => Console.WriteLine(p);
+    private static readonly Action<string> WL = Console.WriteLine;
 
     public void Start()
     {
@@ -160,10 +160,10 @@ public class Program
     {
         WL("正在寻找文件");
 
-        CheckFiles();
+        CheckFiles(true);
         WL($"共找到{allFilesCount}个文件，筛选{sourceFiles.Count}个，排除了{excludeFilesCount}个");
-        WL($"直接复制{copyFiles.Count}个，大小{copyFilesLength / (1024 * 1024)}MB");
-        WL($"需要压缩{compressFiles.Count}个，大小{compressFilesLength / (1024 * 1024)}MB");
+        WL($"直接复制{copyFiles.Count}个（跳过{copySkipFiles}个），大小{copyFilesLength / (1024 * 1024)}MB");
+        WL($"需要压缩{compressFiles.Count}个（跳过{compressSkipFiles}个），大小{compressFilesLength / (1024 * 1024)}MB");
         WL($"按回车键继续...");
         while (Console.ReadKey().Key != ConsoleKey.Enter)
         {
@@ -268,17 +268,14 @@ public class Program
         WL("完成");
     }
 
-    private void CheckFiles()
+    private void CheckFiles(bool usedForCompressAndCopy)
     {
         foreach (var file in new DirectoryInfo(Config.SourceDir).EnumerateFiles("*", SearchOption.AllDirectories))
         {
-            if (++allFilesCount % 100 == 0)
+            if (++allFilesCount % 10 == 0)
             {
-                W($"{allFilesCount}\t");
-                if (allFilesCount % 1000 == 0)
-                {
-                    WL("");
-                }
+                Console.CursorLeft = 0;
+                W($"已搜索{allFilesCount}个文件");
             }
 
             if (rBlack.IsMatch(file.FullName)
@@ -290,20 +287,61 @@ public class Program
 
             if (rCompress.IsMatch(file.Name))
             {
-                sourceFiles.TryAdd(Path.GetRelativePath(Config.SourceDir, file.FullName), null);
-                compressFiles.Add(file);
-                compressFilesLength += file.Length;
+                if (NeedProcess(TaskType.Compress, file))
+                {
+                    sourceFiles.TryAdd(Path.GetRelativePath(Config.SourceDir, file.FullName), null);
+                    compressFiles.Add(file);
+                    compressFilesLength += file.Length;
+                    Console.CursorLeft = 0;
+                    WL($"需要压缩：{file.FullName}");
+                }
+                else
+                {
+                    compressSkipFiles++;
+                }
             }
             else if (rCopy.IsMatch(file.Name))
             {
-                sourceFiles.TryAdd(Path.GetRelativePath(Config.SourceDir, file.FullName),null);
-                copyFiles.Add(file);
-                copyFilesLength += file.Length;
+                if (NeedProcess(TaskType.Copy, file))
+                {
+                    sourceFiles.TryAdd(Path.GetRelativePath(Config.SourceDir, file.FullName), null);
+                    copyFiles.Add(file);
+                    copyFilesLength += file.Length;
+                    Console.CursorLeft = 0;
+                    WL($"需要复制：{file.FullName}");
+                }
+                else
+                {
+                    copySkipFiles++;
+                }
             }
 
         }
         WL("");
         WL("");
+    }
+
+    private bool NeedProcess(TaskType type, FileInfo file)
+    {
+        if (type is TaskType.Delete)
+        {
+            return true;
+        }
+        if (!Config.SkipIfExist)
+        {
+            return true;
+        }
+
+
+        var distFile = new FileInfo(GetDistPath(file.FullName, type is TaskType.Copy ? null : Config.OutputFormat, false, out _));
+
+        if (distFile.Exists && (type is TaskType.Compress || file.Length == distFile.Length && file.LastWriteTime == distFile.LastWriteTime))
+        {
+            return false;
+        }
+
+        return true;
+
     }
 
     private void Compress()
@@ -349,7 +387,7 @@ public class Program
         }
         if (addToSet)
         {
-            sourceFiles.TryAdd(subPath,null);
+            sourceFiles.TryAdd(subPath, null);
         }
         if (newExtension != null)
         {
@@ -369,15 +407,7 @@ public class Program
         string distPath = GetDistPath(file.FullName, Config.OutputFormat, out string subPath);
         if (File.Exists(distPath))
         {
-            if (Config.SkipIfExist)
-            {
-                WL($"{index}\t\t已存在 {subPath} 跳过");
-                return;
-            }
-            else
-            {
-                File.Delete(distPath);
-            }
+            File.Delete(distPath);
         }
         string dir = Path.GetDirectoryName(distPath)!;
         if (!Directory.Exists(dir))
@@ -437,15 +467,7 @@ public class Program
             string distPath = GetDistPath(file.FullName, null, out string subPath);
             if (File.Exists(distPath))
             {
-                if (Config.SkipIfExist)
-                {
-                    WL($"{index}\t\t已存在 {subPath} 跳过");
-                    continue;
-                }
-                else
-                {
-                    File.Delete(distPath);
-                }
+                File.Delete(distPath);
             }
             string dir = Path.GetDirectoryName(distPath)!;
             if (!Directory.Exists(dir))
@@ -461,7 +483,7 @@ public class Program
     private void DeleteFilesThatExistedInDistDirButNotInSrcDir()
     {
         WL("正在寻找文件");
-        CheckFiles();
+        CheckFiles(false);
         WL($"共找到{sourceFiles.Count}个需要的文件");
         WL("正在寻找不需要的文件");
 
@@ -530,4 +552,11 @@ public class Program
 
         return null;
     }
+}
+
+public enum TaskType
+{
+    Copy,
+    Compress,
+    Delete
 }

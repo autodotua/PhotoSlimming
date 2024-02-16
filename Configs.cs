@@ -1,5 +1,17 @@
-﻿public class Configs
+﻿using System.Text.Encodings.Web;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using System.Text.Unicode;
+
+public class Configs
 {
+    internal static readonly JsonSerializerOptions jsonOptions = new JsonSerializerOptions()
+    {
+        Encoder = JavaScriptEncoder.Create(UnicodeRanges.All),
+        TypeInfoResolver = ConfigsSourceGenerationContext.Default,
+        WriteIndented = true,
+    };
+
     public string Name { get; set; } = "未命名";
     /// <summary>
     /// 是否在处理前清空目标目录
@@ -69,4 +81,9 @@
     /// 最深文件层级，例如设置为2，相对路径为D1/D2/D3/D4/File.ext，则目标相对路径将改为D1/D2/D3-D4-File.ext
     /// </summary>
     public int DeepestLevel { get; set; } = 10000;
+}
+[JsonSourceGenerationOptions(WriteIndented = true)]
+[JsonSerializable(typeof(Configs))]
+internal partial class ConfigsSourceGenerationContext : JsonSerializerContext
+{
 }
