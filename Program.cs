@@ -64,8 +64,8 @@ public class Program
 
 #if DEBUG
             WL("DEBUG模式，配置将被重写");
-            p.Config.SourceDir = @"O:\旧事重提\历史";
-            p.Config.DistDir = @"Z:\手机照片\旧事重提\历史\";
+            p.Config.SourceDir = @"C:\Users\autod\OneDrive\图片\屏幕快照";
+            p.Config.DistDir = @"C:\Users\autod\Desktop\testdir";
             p.Config.DeepestLevel = 2;
             p.Config.Thread = 8;
             p.Config.BlackList = "(网络)|(妈妈手机照片)";
@@ -98,13 +98,13 @@ public class Program
 
     private int allFilesCount = 0;
 
-    private int compressSkipFiles = 0;
+    private List<FileInfo> compressSkipFiles =  new List<FileInfo>();
 
     private List<FileInfo> compressFiles = new List<FileInfo>();
 
     private long compressFilesLength = 0;
 
-    private int copySkipFiles = 0;
+    private List<FileInfo> copySkipFiles = new List<FileInfo>();
 
     private List<FileInfo> copyFiles = new List<FileInfo>();
 
@@ -162,8 +162,8 @@ public class Program
 
         CheckFiles(true);
         WL($"共找到{allFilesCount}个文件，筛选{sourceFiles.Count}个，排除了{excludeFilesCount}个");
-        WL($"直接复制{copyFiles.Count}个（跳过{copySkipFiles}个），大小{copyFilesLength / (1024 * 1024)}MB");
-        WL($"需要压缩{compressFiles.Count}个（跳过{compressSkipFiles}个），大小{compressFilesLength / (1024 * 1024)}MB");
+        WL($"直接复制{copyFiles.Count}个（跳过{copySkipFiles.Count}个），大小{copyFilesLength / (1024 * 1024)}MB");
+        WL($"需要压缩{compressFiles.Count}个（跳过{compressSkipFiles.Count}个），大小{compressFilesLength / (1024 * 1024)}MB");
         WL($"按回车键继续...");
         while (Console.ReadKey().Key != ConsoleKey.Enter)
         {
@@ -297,7 +297,7 @@ public class Program
                 }
                 else
                 {
-                    compressSkipFiles++;
+                    compressSkipFiles.Add(file);
                 }
             }
             else if (rCopy.IsMatch(file.Name))
@@ -312,7 +312,7 @@ public class Program
                 }
                 else
                 {
-                    copySkipFiles++;
+                    copySkipFiles.Add(file);
                 }
             }
 
@@ -489,9 +489,9 @@ public class Program
 
         int index = 0;
 
-        var desiredDistFiles = copyFiles
+        var desiredDistFiles = copySkipFiles
             .Select(file => GetDistPath(file.FullName, null, false, out _))
-             .Concat(compressFiles
+             .Concat(compressSkipFiles
                 .Select(file => GetDistPath(file.FullName, Config.OutputFormat, false, out _)))
              .ToHashSet();
 
